@@ -175,11 +175,7 @@ def getArgs():
 
 if __name__ == '__main__':
 
-
-
 	docArgs = getArgs()
-
-	print docArgs
 
 	if docArgs['--xkcd']: plt.xkcd()
 
