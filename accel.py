@@ -80,7 +80,7 @@ class Arduino(object):
 		self.baudrate = baudrate
 		self.timeout = timeout
 		self.name = "Arduino " + str(self.ID)
-		self.buffer = []
+		self.buffer = ""
 		self.data = [] 	#TODO implement better buffer system
 
 		self.firstContact = True
@@ -105,7 +105,10 @@ class Arduino(object):
 					self.ser.flushInput()				
 					time.sleep(0.05)
 
-			self.buffer.append(Vec3(*[int(thing) for thing in self.ser.readline().strip().split(',')]))
+			self.buffer = self.buffer + str(self.ser.readline())
+			#(Vec3(*[int(thing) for thing in self.ser.readline().strip().split(',')]))
+
+			
 
 	def writeSer(self,val):
 		"""Writes serial data to the Arduino object"""
