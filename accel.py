@@ -13,11 +13,12 @@ git: https://github.com/evanvlane/ardAccel
 
 Usage: 
   accel.py ports
+  accel.py load <FILE>
   accel.py [-fdvx] [-p PORT] [-b BAUD] [-t TIMEOUT] [-r DATA] [-g GRANGE] (-l LENGTH) <FILE>
 
 Arguments:
   ports  	Prints a list of available COM ports
-  FILE  	Output file name 
+  FILE  	File name to be loaded or saved 
 
 Options:
   -b BAUD --baudrate=BAUD  	Baudrate for serial communcation [default: 115200]
@@ -87,27 +88,39 @@ class Arduino(object):
 
 		try:
 			self.ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
+			print "here"
 		except:
 			print("The serial connection on COM{0} for {1} was unable to be established.").format(port+1, self.name)
 	
 	def __len__(self):
-		return len(self.buffer)
+		return len(self.data)
 
 	def readSer(self):
 		"""Reads serial data from Arduino object"""
 
 		if (self.ser.inWaiting() > 0):
+			self.count = 0
+
 			if self.firstContact:
 				self.ser.write('Go')
 				self.firstContact = False
+				print("Begining data read from {0}.").format(self.name)
 				
 				for __ in xrange(5):
 					self.ser.flushInput()				
 					time.sleep(0.05)
 
 			self.buffer = self.buffer + str(self.ser.readline())
-			#(Vec3(*[int(thing) for thing in self.ser.readline().strip().split(',')]))
+			self.buffer = ''.join(self.buffer.split())
+			self.count = self.count + 1
 
+			for point in filter(None, self.buffer.split(';')):
+				self.data.append(Vec3(*[int(coord) for coord in point.split(',')]))
+
+			self.buffer = ''
+
+			#print len(self.data[-1])
+			#lastData = len(self.data[-1])
 			
 
 	def writeSer(self,val):
@@ -138,6 +151,7 @@ def dataWriter(buffer=None, filename=None, force=False, date=False):
 		filename = firstFN[:-4] + str(count) + firstFN[-4:]
 		count += 1
 
+	print('Data writing to: "{0}"').format(filename)
 	with open(filename, 'wb') as csvfile:
 		fieldnames = ['X Values', 'Y Values', 'Z Values']
 		writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -147,20 +161,32 @@ def dataWriter(buffer=None, filename=None, force=False, date=False):
 		for i in buffer:
 			writer.writerow({'X Values': i.x, 'Y Values': i.y, 'Z Values': i.z})
 
+def dataReader(filename=None):
+	filename = os.path.join("./data/",filename)
+
+	with open(filename, 'rb') as csvfile:
+		return numpy.genfromtxt(csvfile, delimiter=',')
+
 def makeFig(data=None, datarate=3200):
 	"""
 	prints the acquired data
 	"""
-	time = len(data)/datarate
+
+	time = len(data)/float(datarate)
 
 	timestep = numpy.linspace(0,time,len(data))
 
 	plt.axis('auto')
 	plt.grid(True)
 
-	plt.plot(timestep, [dat.x for dat in data], 'r-', label='X Axis Values')
-	plt.plot(timestep, [dat.y for dat in data], 'b-', label='Y Axis Values')
-	plt.plot(timestep, [dat.z for dat in data], 'g-', label='Z Axis Values')
+	try:
+		plt.plot(timestep, [dat.x for dat in data], 'r-', label='X Axis Values')
+		plt.plot(timestep, [dat.y for dat in data], 'b-', label='Y Axis Values')
+		plt.plot(timestep, [dat.z for dat in data], 'g-', label='Z Axis Values')
+	except:
+		plt.plot(timestep, [dat[0] for dat in data], 'r-', label='X Axis Values')
+		plt.plot(timestep, [dat[1] for dat in data], 'b-', label='Y Axis Values')
+		plt.plot(timestep, [dat[2] for dat in data], 'g-', label='Z Axis Values')
 	plt.legend(loc='lower right')
 	plt.show()
 
@@ -195,6 +221,9 @@ if __name__ == '__main__':
 		for i in enumPorts():
 			print "  - " + i
 		print "==============================="
+	elif docArgs['load']:
+		makeFig(data=dataReader(docArgs['<FILE>']))
+
 	else:
 		ard1 = Arduino(port=docArgs['--port'], baudrate=docArgs['--baudrate'], timeout=docArgs['--timeout'])
 
@@ -203,9 +232,9 @@ if __name__ == '__main__':
 		while True:
 			ard1.readSer()
 
-			if len(ard1) == int(docArgs['--length']*docArgs['--datarate']):
+			if len(ard1) >= int(docArgs['--length']*docArgs['--datarate']):
 
-				dataWriter(buffer=ard1.buffer, filename=docArgs['<FILE>'], force=docArgs['--force'],date=docArgs['--date'])
+				dataWriter(buffer=ard1.data, filename=docArgs['<FILE>'], force=docArgs['--force'],date=docArgs['--date'])
 				toc = timeit.default_timer()
 			
 				
@@ -215,5 +244,5 @@ if __name__ == '__main__':
 				ard1.writeSer('s')
 
 				if docArgs['--visualize']:
-					makeFig(ard1.buffer,docArgs['--datarate'])
+					makeFig(ard1.data,docArgs['--datarate'])
 				break
