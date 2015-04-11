@@ -13,7 +13,7 @@ git: https://github.com/evanvlane/ardAccel
 
 Usage: 
   accel.py ports
-  accel.py load <FILE>
+  accel.py open [-x] <FILE>
   accel.py [-fdvx] [-p PORT] [-b BAUD] [-t TIMEOUT] [-r DATA] [-g GRANGE] (-l LENGTH) <FILE>
 
 Arguments:
@@ -24,10 +24,10 @@ Options:
   -b BAUD --baudrate=BAUD  	Baudrate for serial communcation [default: 115200]
   -d --date  			Prepend recording date to filename
   -f --force	  		Overwrite output file if it already exists
-  -g --grange=GRANGE  		Max +/- force in units of g [default: 4]
+  -g GRANGE --grange=GRANGE  		Max +/- force in units of g [default: 4]
   -l LENGTH --length=LENGTH  	Seconds of data to be recorded [default: 5]
   -p PORT --port=PORT  		COM port for Arduino [default: 2]
-  -r DATA --datarate=DATA  	Output data rate of ADXL345 in Hz[default: 3200]
+  -r DATA --datarate=DATA  	Set data rate of ADXL345 in Hz[default: 3200]
   -t TIMEOUT --timeout=TIMEOUT  Timeout for serial communcation [default: 1]
   -v --visualize  		Visualize the results via matplotlib
   -x --xkcd  			Plots come out in XKCD style. Ya know... For kids!
@@ -65,14 +65,15 @@ from docopt import docopt, DocoptExit
 # Classes
 #------------------------------------------------------------------------------
 
-Vec3 = namedtuple('Vector', ['x','y','z'])	#Named tuple for storing accel data ponts
+Vec3 = namedtuple('Vector', ['x','y','z'])	#Named tuple for storing accel data points
 
 class Arduino(object):
 	"""Arduino Object"""
 
 	ardCount = 0
+	correctionFactor = {"2g": 3.9, "4g": 7.8, "8g": 1, "16g": 27.2553125} #Obtained by getting a stationary Z signal and dividing its average by 9.80665 m/s^2
 
-	def __init__(self, port=2, baudrate=9600, timeout=1):
+	def __init__(self, port=2, grange=4, datarate=3200, baudrate=9600, timeout=1):
 		self.__class__.ardCount += 1
 		self.ID = self.__class__.ardCount
 
@@ -83,15 +84,26 @@ class Arduino(object):
 		self.name = "Arduino " + str(self.ID)
 		self.buffer = ""
 		self.data = [] 	#TODO implement better buffer system
+		self.grange = grange
+		self.datarate = datarate
 
 		self.firstContact = True
 
 		try:
 			self.ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
-			print "here"
 		except:
 			print("The serial connection on COM{0} for {1} was unable to be established.").format(port+1, self.name)
 	
+		#Wait until the Arduino is up and running its establishContact() routine
+
+		self.ser.flushInput()
+		while (self.ser.inWaiting() == 0):
+			print "Waiting"
+
+		#Set the g force range and the acquisition datarate
+		self.setRegister(grange)
+		self.setRegister(datarate)
+
 	def __len__(self):
 		return len(self.data)
 
@@ -102,7 +114,7 @@ class Arduino(object):
 			self.count = 0
 
 			if self.firstContact:
-				self.ser.write('Go')
+				self.ser.write('a')
 				self.firstContact = False
 				print("Begining data read from {0}.").format(self.name)
 				
@@ -115,7 +127,7 @@ class Arduino(object):
 			self.count = self.count + 1
 
 			for point in filter(None, self.buffer.split(';')):
-				self.data.append(Vec3(*[int(coord) for coord in point.split(',')]))
+				self.data.append(Vec3(*[int(coord)/self.__class__.correctionFactor["16g"] for coord in point.split(',')]))
 
 			self.buffer = ''
 
@@ -130,11 +142,16 @@ class Arduino(object):
 
 	def close(self):
 		self.ser.close()
+
+	def setRegister(self,tuple):
+		pass
+
+
 		
 # Functions
 #------------------------------------------------------------------------------
 
-def dataWriter(buffer=None, filename=None, force=False, date=False):
+def dataWriter(buffer=None, length=1, datarate=3200, filename=None, force=False, date=False):
 	"""dataWriter writes the inculded buffer to the listed file"""
 
 	if not os.path.exists(os.path.join(os.getcwd(),"data")):
@@ -156,7 +173,9 @@ def dataWriter(buffer=None, filename=None, force=False, date=False):
 		fieldnames = ['X Values', 'Y Values', 'Z Values']
 		writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
+		writer.writerow({'X Values': datarate, 'Y Values': length, 'Z Values': 5})#str(datetime.date.today())})
 		writer.writeheader()
+
 
 		for i in buffer:
 			writer.writerow({'X Values': i.x, 'Y Values': i.y, 'Z Values': i.z})
@@ -165,29 +184,40 @@ def dataReader(filename=None):
 	filename = os.path.join("./data/",filename)
 
 	with open(filename, 'rb') as csvfile:
-		return numpy.genfromtxt(csvfile, delimiter=',')
 
-def makeFig(data=None, datarate=3200):
+		data = numpy.genfromtxt(csvfile, delimiter=',')
+		return data[2:data.shape[0]]
+
+def makeFig(data=None, scaleFactor=1, datarate=3200):
 	"""
 	prints the acquired data
 	"""
+	if docArgs['--xkcd']: plt.xkcd()
 
 	time = len(data)/float(datarate)
 
-	timestep = numpy.linspace(0,time,len(data))
-
-	plt.axis('auto')
-	plt.grid(True)
+	fig, ax1 = plt.subplots()
+	ax1.axis('auto')
+	plt.ylabel("Acceleration (g)")
+	plt.xlabel("Time (s)")
+	ax1.grid(True)
 
 	try:
-		plt.plot(timestep, [dat.x for dat in data], 'r-', label='X Axis Values')
-		plt.plot(timestep, [dat.y for dat in data], 'b-', label='Y Axis Values')
-		plt.plot(timestep, [dat.z for dat in data], 'g-', label='Z Axis Values')
+		timestep = numpy.linspace(0,time,len(data))
+		ax1.plot(timestep, [dat.x for dat in data], 'r-', label='X Axis Values', lw=0.5)
+		ax1.plot(timestep, [dat.y for dat in data], 'b-', label='Y Axis Values', lw=0.5)
+		ax1.plot(timestep, [dat.z for dat in data], 'g-', label='Z Axis Values', lw=0.5)
 	except:
-		plt.plot(timestep, [dat[0] for dat in data], 'r-', label='X Axis Values')
-		plt.plot(timestep, [dat[1] for dat in data], 'b-', label='Y Axis Values')
-		plt.plot(timestep, [dat[2] for dat in data], 'g-', label='Z Axis Values')
-	plt.legend(loc='lower right')
+		data = numpy.delete(data,0,0)
+		timestep = numpy.linspace(0,time,len(data))
+		#data2 = numpy.trapz(data[:,0])
+		ax1.plot(timestep, [dat[0] for dat in data], 'r-', label='X Axis Values', lw=0.5)
+		ax1.plot(timestep, [dat[1] for dat in data], 'b-', label='Y Axis Values', lw=0.5)
+		ax1.plot(timestep, [dat[2] for dat in data], 'g-', label='Z Axis Values', lw=0.5)
+		ax2 = ax1.twinx()
+		#ax2.plot(timestep, velocity, 'k-', label='Velocity', lw=0.5)
+		
+	ax1.legend(loc='lower right')
 	plt.show()
 
 def getArgs():
@@ -199,15 +229,14 @@ def getArgs():
 	arguments['--datarate'] = float(arguments['--datarate'])
 	arguments['--baudrate'] = int(arguments['--baudrate'])
 	arguments['--timeout'] = int(arguments['--timeout'])
-
+	print arguments
 	return arguments
 
 if __name__ == '__main__':
 
 	docArgs = getArgs()
 
-	if docArgs['--xkcd']: plt.xkcd()
-
+	#Set the serial port
 	if docArgs['--port'].startswith("COM"):
 		docArgs['--port'] = int(docArgs['--port'][3])-1
 	elif len(docArgs['--port']) < 3:
@@ -215,17 +244,18 @@ if __name__ == '__main__':
 	else:
 		print "Unknown Port"
 
+	#Enumerate the COM ports available to the program
 	if docArgs['ports']:
 		print "==============================="
 		print "COM ports currently plugged in:"
 		for i in enumPorts():
 			print "  - " + i
 		print "==============================="
-	elif docArgs['load']:
+	#Open a file
+	elif docArgs['open']:
 		makeFig(data=dataReader(docArgs['<FILE>']))
-
 	else:
-		ard1 = Arduino(port=docArgs['--port'], baudrate=docArgs['--baudrate'], timeout=docArgs['--timeout'])
+		ard1 = Arduino(port=docArgs['--port'], grange=docArgs['--grange'], datarate=docArgs['--datarate'], baudrate=docArgs['--baudrate'], timeout=docArgs['--timeout'])
 
 		tic = timeit.default_timer()
 
@@ -234,7 +264,7 @@ if __name__ == '__main__':
 
 			if len(ard1) >= int(docArgs['--length']*docArgs['--datarate']):
 
-				dataWriter(buffer=ard1.data, filename=docArgs['<FILE>'], force=docArgs['--force'],date=docArgs['--date'])
+				dataWriter(buffer=ard1.data, length=docArgs['--length'], datarate=docArgs['--datarate'], filename=docArgs['<FILE>'], force=docArgs['--force'],date=docArgs['--date'])
 				toc = timeit.default_timer()
 			
 				
