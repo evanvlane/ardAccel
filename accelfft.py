@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-
+import FileDialog
 
 def dataReader(filename=None, axis=0):
 	'Reads CSV files into numpy array and returns a single axis of data.'
@@ -26,7 +26,7 @@ if __name__ == "__main__":
 	color = 'k-'
 
 	#Gets all the data from my csv. Axis is 0-indexed and in x,y,z order.
-	y, datarate, time = dataReader(filename="Test14.csv",axis=0)
+	y, datarate, time = dataReader(filename="Toothbrush.csv",axis=0)
 	sampling = 1.0/datarate
 	#These two lines should be identical. It's a good indicator that
 	#something is wrong if they're not.
@@ -35,13 +35,13 @@ if __name__ == "__main__":
 	#y = np.sin(260*np.pi*np.linspace(0,time,n))
 
 	yf = np.fft.rfft(y*np.hanning(n))*2/n
-	yfreq = np.fft.fftfreq(n,d=sampling)*2
+	yfreq = np.fft.fftfreq(n,d=sampling)
 
 	#Just deal with positive frequencies.
 	yfreq = yfreq[:n/2+1]
 
 	#Puts the limits as 0 to 5% above the max amplitude
-	ax0.set_ylim(0,np.max(abs(yf))+0.05*np.max(abs(yf)))
+	ax0.set_ylim(0,np.max(abs(yf[10:len(yf)]))+0.05*np.max(abs(yf[10:len(yf)])))
 	
 	#Uncomment this if you want to focus on a specific frequency range.
 	ax0.set_xlim(-1,1600) 

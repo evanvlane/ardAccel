@@ -1,4 +1,9 @@
 data/
+build/
+dist/
 *.sublime*
 *.pyc
 *.csv
+*.exe
+*.spec
+*.conf
